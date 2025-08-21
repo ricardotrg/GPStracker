@@ -13,5 +13,4 @@ public class GpStrackerApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(GpStrackerApplication.class, args);
 	}
-
 }
