@@ -1,0 +1,2 @@
+INSERT INTO vehicle (id, name, plate, imei)
+VALUES ('00000000-0000-0000-0000-000000000001','Truck 1','ABC123','357852963');

@@ -3,12 +3,7 @@ package com.Enlace.io.GPStracker;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
-@SpringBootApplication(
-		exclude = {
-				org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration.class,
-				org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration.class
-		}
-)
+@SpringBootApplication()
 public class GpStrackerApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(GpStrackerApplication.class, args);
