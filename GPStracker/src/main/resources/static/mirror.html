@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>Espejo · GPStracker</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        html,body{height:100%;margin:0}
+        .bar{padding:8px 12px;border-bottom:1px solid #eee;font:13px system-ui,sans-serif;color:#333}
+        #map{height:calc(100% - 42px)}
+    </style>
+</head>
+<body>
+<div class="bar">Última posición: <span id="st">—</span> &nbsp;|&nbsp; <span id="info">—</span></div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const map=L.map('map').setView([19.4326,-99.1332],12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+
+    const st=document.getElementById('st');
+    const token=new URLSearchParams(location.search).get('token');
+    let marker=null, timer=null;
+
+    if(!token){ st.textContent='sin token'; }
+    else { start(token); }
+
+    async function last(tok){
+        const r=await fetch(`/s/${tok}/last`,{cache:'no-store'});
+        if(!r.ok) throw new Error(r.status);
+        return r.json();
+    }
+
+    function paint(p){
+        const {lat,lon,fixTime}=p;
+        if(marker) marker.setLatLng([lat,lon]);
+        else marker=L.marker([lat,lon]).addTo(map);
+        map.setView([lat,lon], Math.max(map.getZoom(),13));
+
+        // format to local human-readable string
+        const dt = new Date(fixTime);
+        const ageSec = (Date.now() - dt.getTime()) / 1000;
+        if (ageSec < 60) {
+            st.textContent = '✅ OK — ' + dt.toLocaleString();
+        } else {
+            const mins = Math.floor(ageSec/60);
+            st.textContent = '⚠️ Offline ' + mins + ' min — ' + dt.toLocaleString();
+        }
+        const info = document.getElementById('info');
+        if (p.speedKph != null && p.headingDeg != null) {
+            const dir = headingToCardinal(p.headingDeg);
+            info.textContent = `${p.speedKph} km/h · ${dir}`;
+        } else {
+            info.textContent = '—';
+        }
+    }
+
+    function start(tok){
+        if(timer) clearInterval(timer);
+        const tick=async()=>{try{paint(await last(tok));}catch(e){st.textContent = '⏳ Waiting... (' + e.message + ')';
+        }};
+        tick(); timer=setInterval(tick,1500);
+    }
+
+    function headingToCardinal(deg) {
+        const dirs = ["N","NE","E","SE","S","SW","W","NW"];
+        return dirs[Math.round(deg/45) % 8];
+    }
+
+</script>
+</body>
+</html>

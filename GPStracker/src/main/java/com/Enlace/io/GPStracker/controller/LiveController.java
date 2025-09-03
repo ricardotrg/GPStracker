@@ -4,6 +4,7 @@ import com.Enlace.io.GPStracker.dto.LastPosRes;
 import com.Enlace.io.GPStracker.dto.ShareRes;
 import com.Enlace.io.GPStracker.service.TrackingService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;

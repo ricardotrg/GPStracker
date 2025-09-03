@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>Owner · GPStracker</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        html,body{height:100%;margin:0;font-family:system-ui,sans-serif}
+        .bar{display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px solid #eee}
+        #map{height:calc(100% - 48px)}
+        input,button{padding:8px}
+        .status{margin-left:auto;color:#666;font-size:12px}
+    </style>
+</head>
+<body>
+<div class="bar">
+    <select id="veh" style="min-width:360px"><option value="">Select vehicle…</option></select>
+    <button id="start">Start</button>
+    <button id="stop" disabled>Stop</button>
+    <button id="share">Create share</button>
+    <button id="locate" title="Center & follow">📍 Locate</button>
+    <label><input type="checkbox" id="trail" checked> Trail (24h)</label>
+    <span class="status" id="st">idle</span>
+    <span class="status" id="info">—</span>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    #trail
+    let trailOn = true;
+    let trail = L.polyline([], {color:'#0A84FF', weight:5, opacity:0.9, smoothFactor:1}).addTo(map);
+    const trailBtn = document.getElementById('trail');
+    let samples = []; // {lat,lon,ts}
+    trailBtn.onchange = () => {
+        trailOn = trailBtn.checked;
+        if (!trailOn) trail.setLatLngs([]);
+        else redrawTrail();
+    };
+    map.on('zoomend', () => { trail.setStyle({weight: Math.max(2, Math.min(8, Math.round(map.getZoom()/2)))})});
+
+    // Map
+    const map = L.map('map').setView([19.4326,-99.1332],12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+
+    // UI refs
+    let marker=null, timer=null;
+    const st = document.getElementById('st');
+    const veh = document.getElementById('veh');
+
+    let follow = true, programmatic = false;
+    map.on('movestart', () => { if (!programmatic) follow = false; }); // user moved → stop following
+    document.getElementById('locate').onclick = () => { follow = true; if (marker) { programmatic = true; map.setView(marker.getLatLng(), Math.max(map.getZoom(),13)); programmatic = false; } };
+
+
+    (async () => {
+        try {
+            const r = await fetch('/api/vehicles', {cache:'no-store'});
+            if (!r.ok) return;
+            const list = await r.json(); // [{id,name,plate}]
+            for (const v of list) {
+                const opt = document.createElement('option');
+                opt.value = v.id;
+                opt.textContent = v.name ? `${v.name}${v.plate ? ' · '+v.plate : ''}` : v.id;
+                veh.appendChild(opt);
+            }
+            // Support ?vehicleId=... preselect
+            const qs = new URLSearchParams(location.search);
+            if (qs.get('vehicleId')) veh.value = qs.get('vehicleId');
+        } catch (e) {/* ignore */}
+    })();
+
+    // Optional: allow ?vehicleId=... in URL
+    const qs = new URLSearchParams(location.search);
+    if (qs.get('vehicleId')) veh.value = qs.get('vehicleId');
+
+    document.getElementById('start').onclick = () => {
+        const id = veh.value.trim(); if (!id) { alert('Select a vehicle'); return; }
+        start(id); toggle(true);
+    };
+
+    document.getElementById('stop').onclick = () => { stop(); toggle(false); };
+
+    // FIX: share link should open mirror page, not /s/{token}
+    document.getElementById('share').onclick = async () => {
+        const id = veh.value.trim(); if (!id) { alert('vehicleId'); return; }
+        const r = await fetch(`/api/vehicles/${id}/share`, { method: 'POST' });
+        if (!r.ok) { alert('ERR ' + r.status); return; }
+        const j = await r.json();
+        const shareUrl = location.origin + `/mirror.html?token=${j.token}`;
+        await navigator.clipboard.writeText(shareUrl);
+        alert('Share link copied:\n' + shareUrl);
+    };
+
+
+    function toggle(on){
+        document.getElementById('start').disabled = on;
+        document.getElementById('stop').disabled  = !on;
+    }
+
+    async function last(id){
+        const r = await fetch(`/api/vehicles/${id}/last`, { cache:'no-store' });
+        if (!r.ok) throw new Error(r.status);
+        return r.json();
+    }
+
+    function paint(p){
+        const {lat, lon} = p;
+        if (marker) marker.setLatLng([lat,lon]);
+        else marker = L.marker([lat,lon]).addTo(map);
+        if (follow) { programmatic = true; map.setView([lat,lon], Math.max(map.getZoom(),13)); programmatic = false; }
+        const dt = new Date(p.fixTime);
+        const ageSec = (Date.now() - dt.getTime()) / 1000;
+        if (ageSec < 60) {
+            st.textContent = '✅ OK — ' + dt.toLocaleString();
+        } else {
+            const mins = Math.floor(ageSec/60);
+            st.textContent = '⚠️ Offline ' + mins + ' min — ' + dt.toLocaleString();
+        }
+        // speed + heading
+        const info = document.getElementById('info');
+        if (p.speedKph != null && p.headingDeg != null) {
+            const dir = headingToCardinal(p.headingDeg);
+            info.textContent = `${p.speedKph} km/h · ${dir}`;
+        } else {
+            info.textContent = '—';
+        }
+
+
+    }
+
+    function start(id){
+        stop();
+        follow = true;
+
+        const tick = async () => {
+            try { paint(await last(id)); }
+            catch(e){ st.textContent = '⏳ Waiting... ('+e.message+')';
+            }
+        };
+        tick();
+        timer = setInterval(tick, 1500);
+        st.textContent = 'polling...';
+    }
+
+    function stop(){
+        if (timer) clearInterval(timer);
+        timer = null; st.textContent = 'stopped';
+    }
+
+    function headingToCardinal(deg) {
+        const dirs = ["N","NE","E","SE","S","SW","W","NW"];
+        return dirs[Math.round(deg/45) % 8];
+    }
+
+</script>
+</body>
+</html>
